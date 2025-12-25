@@ -177,7 +177,7 @@ col3.metric("🌎 Destinos", f"{df_filtrado['PAIS_DESTINO'].nunique()} Paises")
 
 st.markdown("---")
 
-tab1, tab2, tab3 = st.tabs(["📊 Visión General", "📈 Detalle", "📋 Datos Crudos"])
+tab1, tab2 = st.tabs(["📊 Visión General", "📋 Datos Crudos"])
 
 # 2. PESTAÑA 1: TU DASHBOARD VISUAL (Aquí va tu código)
 with tab1:
