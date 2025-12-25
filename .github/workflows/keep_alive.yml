@@ -1,0 +1,28 @@
+name: Mantener Supabase Activo
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-database:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependencias
+        run: |
+          pip install sqlalchemy psycopg2-binary
+
+      - name: Ejecutar Ping
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        run: python ping_db.py
