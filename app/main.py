@@ -257,15 +257,23 @@ with tab1:
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
-# 3. PESTAÑA 2: Oportunidad de expansión (Placeholder)
 with tab2:
-    st.header("Análisis Detallado")
-    st.info("🚧 Gráfico de línea temporal (Enero-Diciembre) en proceso.")
-
-# 4. PESTAÑA 3: Datos Crudos (La tabla)
-with tab3:
     st.header("Base de Datos Filtrada")
     # Movemos la tabla aquí para limpiar la vista principal
     st.dataframe(
         df_filtrado.sort_values("VALOR_FOB", ascending=False), use_container_width=True
     )
+
+
+# --- FOOTER ---
+st.markdown("---")
+st.markdown(
+    """
+    <div style="text-align: center; color: grey;">
+        Desarrollado por <b>Cristóbal Vergara</b> | Ingeniería Civil Industrial UdeC<br>
+        <a href="https://www.linkedin.com/in/cristobalvergarajofre/" target="_blank">LinkedIn</a> | 
+        <a href="mailto:crvergara2022@udec.cl">Contacto</a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
