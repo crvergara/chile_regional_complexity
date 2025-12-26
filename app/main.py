@@ -77,194 +77,236 @@ def get_nombre_producto(codigo):
 conn = st.connection("supabase", type="sql")
 
 
-@st.cache_data(ttl=3600)
-def cargar_data_cloud(anio, region):
-    query = """
-    SELECT 
-        anio as "ANIO",
-        mes as "MES",
-        nombre_region as "NOMBRE_REGION",
-        pais_destino as "PAIS_DESTINO",
-        codigo_hs as "CODIGO_HS",
-        valor_fob as "VALOR_FOB"
-    FROM exportaciones
-    WHERE 1=1
-    """
+def construir_filtro(anio, region):
+    query = " WHERE 1=1"
     params = {}
     if anio != "Todos":
-        query += " AND anio=:anio"
+        query += " AND anio = :anio"
         params["anio"] = int(float(anio))
     if region != "Todas":
-        query += " AND nombre_region=:region"
+        query += " AND nombre_region = :region"
         params["region"] = region
+    return query, params
+
+
+@st.cache_data(ttl=3600)
+def get_kpis(anio, region):
+    filtro, params = construir_filtro(anio, region)
+    query = f"""
+        SELECT
+            SUM(valor_fob) as total_fob,
+            COUNT(DISTINCT codigo_hs) as total_productos,
+            COUNT(DISTINCT pais_destino) as total_paises
+        FROM exportaciones
+        {filtro}
+    """
+    df = conn.query(query, params=params)
+    return df.iloc[0]
+
+
+@st.cache_data(ttl=3600)
+def get_evolucion(anio, region):
+    filtro, params = construir_filtro(anio, region)
+    query = f"""
+        SELECT anio,mes, SUM(valor_fob) as valor_fob
+        FROM exportaciones
+        {filtro}
+        GROUP BY anio,mes
+        ORDER BY anio,mes
+    """
+    return conn.query(query, params=params)
+
+
+@st.cache_data(ttl=3600)
+def get_top_productos(anio, region):
+    filtro, params = construir_filtro(anio, region)
+    query = f"""
+        SELECT codigo_hs, SUM(valor_fob) as valor_fob
+        FROM exportaciones
+        {filtro}
+        GROUP BY codigo_hs
+        ORDER BY valor_fob DESC
+        LIMIT 10
+    """
+    return conn.query(query, params=params)
+
+
+@st.cache_data(ttl=3600)
+def get_top_paises(anio, region):
+    filtro, params = construir_filtro(anio, region)
+    query = f"""
+        SELECT pais_destino, SUM(valor_fob) as valor_fob
+        FROM exportaciones
+        {filtro}
+        GROUP BY pais_destino
+        ORDER BY valor_fob DESC
+        LIMIT 10
+    """
+    return conn.query(query, params=params)
+
+
+@st.cache_data(ttl=3600)
+def get_raw_data(anio, region):
+    filtro, params = construir_filtro(anio, region)
+    query = f"""
+        SELECT anio,mes,nombre_region,pais_destino,codigo_hs,valor_fob
+        FROM exportaciones
+        {filtro}
+        ORDER BY valor_fob DESC
+        LIMIT 5000
+    """
     return conn.query(query, params=params)
 
 
 # --- SIDEBAR (FILTROS DESDE LA NUBE) ---
-st.sidebar.header("🔍 Filtros Cloud")
+st.sidebar.header("🔍 Filtros")
 
-# 1. SELECTOR DE AÑOS
-# Hacemos una mini-consulta SQL solo para obtener los años únicos
-df_anios = conn.query("SELECT DISTINCT anio FROM exportaciones ORDER BY anio")
+# Consulta ligera solo para llenar el menú
+try:
+    df_anios = conn.query("SELECT DISTINCT anio FROM exportaciones ORDER BY anio")
+    lista_anios = sorted(
+        df_anios["anio"].fillna(0).astype(float).astype(int).astype(str).tolist()
+    )
+    lista_anios = [x for x in lista_anios if x != "0"]
+except:
+    lista_anios = []
 
-# ¡OJO AQUÍ! Usamos 'df_anios' (el resultado de la query), NO 'df'
-# Y la columna se llama "anio" (minúscula) porque así quedó en Postgres
-lista_anios = sorted(
-    df_anios["anio"].fillna(0).astype(float).astype(int).astype(str).tolist()
-)
-
-# Agregamos opción 'Todos' y seleccionamos el último por defecto
 lista_anios_opts = ["Todos"] + lista_anios
 anio_sel = st.sidebar.selectbox(
     "📅 Año:", lista_anios_opts, index=len(lista_anios_opts) - 1
 )
 
+try:
+    df_regiones = conn.query(
+        "SELECT DISTINCT nombre_region FROM exportaciones ORDER BY nombre_region"
+    )
+    lista_regiones = ["Todas"] + df_regiones["nombre_region"].tolist()
+except:
+    lista_regiones = ["Todas"]
 
-# 2. SELECTOR DE REGIONES
-# Hacemos otra mini-consulta solo para los nombres de regiones
-df_regiones = conn.query(
-    "SELECT DISTINCT nombre_region FROM exportaciones ORDER BY nombre_region"
-)
-
-lista_regiones = ["Todas"] + df_regiones["nombre_region"].tolist()
 region_sel = st.sidebar.selectbox("📍 Región:", lista_regiones)
 
-try:
-    df_filtrado = cargar_data_cloud(anio_sel, region_sel)
+st.title("🚢 Monitor de Exportaciones de Chile")
+st.markdown(f"**Filtros Activos:** Año `{anio_sel}` | Región `{region_sel}`")
 
-    # Pequeño ajuste para que el mes tenga nombre (si lo necesitas para gráficos)
-    # Como en la DB guardamos el número de mes, lo mapeamos aquí rápido
-    mapa_meses = {
-        1: "Enero",
-        2: "Febrero",
-        3: "Marzo",
-        4: "Abril",
-        5: "Mayo",
-        6: "Junio",
-        7: "Julio",
-        8: "Agosto",
-        9: "Septiembre",
-        10: "Octubre",
-        11: "Noviembre",
-        12: "Diciembre",
-    }
-    if not df_filtrado.empty:
-        df_filtrado["NOMBRE_MES"] = df_filtrado["MES"].map(mapa_meses)
+# 1. Cargar KPIs
+kpis = get_kpis(anio_sel, region_sel)
+total_millones = kpis["total_fob"] / 1_000_000 if kpis["total_fob"] else 0
 
-except Exception as e:
-    st.error(f"Error de conexión: {e}")
-    st.stop()
-
-# TÍTULO DINÁMICO
-if region_sel == "Todas" and anio_sel == "Todos":
-    titulo = "Exportaciones Históricas de Chile"
-elif region_sel != "Todas" and anio_sel == "Todos":
-    titulo = f"Exportaciones Históricas de {region_sel}"
-elif region_sel == "Todas" and anio_sel != "Todos":
-    titulo = f"Exportaciones de Chile - {anio_sel}"
-else:
-    titulo = f"Exportaciones {region_sel} - {anio_sel}"
-
-
-st.title(titulo)
-
-
-# Metricas
-total_exportado = df_filtrado["VALOR_FOB"].sum()
-total_mill = total_exportado / 1000000
 col1, col2, col3 = st.columns(3)
-col1.metric("💰 Total exportado", f"{total_mill:.2f} M$")
-col2.metric("📦 Cantidad de Productos", f"{df_filtrado['CODIGO_HS'].nunique():,} Items")
-col3.metric("🌎 Destinos", f"{df_filtrado['PAIS_DESTINO'].nunique()} Paises")
+col1.metric("💰 Valor Exportado", f"${total_millones:,.0f} M USD")
+col2.metric("📦 Productos Únicos", f"{kpis['total_productos']:,.0f} Productos")
+col3.metric("🌎 Mercados Destino", f"{kpis['total_paises']:,.0f} Paises")
 
 st.markdown("---")
 
+# 2. Pestañas y Gráficos
 tab1, tab2 = st.tabs(["📊 Visión General", "📋 Datos Crudos"])
 
-# 2. PESTAÑA 1: TU DASHBOARD VISUAL (Aquí va tu código)
 with tab1:
-    st.header("Panorama General")
+    # --- Gráfico de Evolución ---
+    df_trend = get_evolucion(anio_sel, region_sel)
 
-    # Creamos las columnas DENTRO de la pestaña
-    col_izq, col_der = st.columns([2, 1])
-
-    if not df_filtrado.empty:
-        st.subheader("Evolucion de exportaciones 2020 - 2024")
-        df_trend = df_filtrado.groupby(["ANIO", "MES"])["VALOR_FOB"].sum().reset_index()
-        df_trend["ANIO"] = df_trend["ANIO"].fillna(0).astype(int)
-        df_trend["MES"] = df_trend["MES"].fillna(0).astype(int)
-
+    if not df_trend.empty:
+        # Arreglo de fecha seguro
+        df_trend["ANIO"] = df_trend["anio"].astype(int)
+        df_trend["MES"] = df_trend["mes"].astype(int)
         df_trend["FECHA_PLOT"] = pd.to_datetime(
             df_trend["ANIO"].astype(str) + "-" + df_trend["MES"].astype(str) + "-01"
         )
+        meses_esp = {
+            1: "Ene",
+            2: "Feb",
+            3: "Mar",
+            4: "Abr",
+            5: "May",
+            6: "Jun",
+            7: "Jul",
+            8: "Ago",
+            9: "Sep",
+            10: "Oct",
+            11: "Nov",
+            12: "Dic",
+        }
+        df_trend["Periodo"] = (
+            df_trend["MES"].map(meses_esp) + "-" + df_trend["ANIO"].astype(str)
+        )
+
         fig_line = px.line(
             df_trend,
             x="FECHA_PLOT",
-            y="VALOR_FOB",
+            y="valor_fob",
+            title=f"Tendencia Mensual ({anio_sel})",
             markers=True,
-            labels={"VALOR_FOB": "Valor exportado USD", "FECHA_PLOT": "Fecha"},
-            title=f"Tendencia mensual -{region_sel} ",
+            labels={
+                "valor_fob": "Monto exportado USD",
+                "FECHA_PLOT": "Fecha",
+                "Periodo": "Mes",
+            },
+            hover_data={"FECHA_PLOT": False, "Periodo": True, "valor_fob": True},
         )
-        fig_line.update_layout(
-            hovermode="x unified"
-        )  # Al pasar el mouse muestra info detallada
+        fig_line.update_layout(hovermode="x unified", xaxis_title=None)
+
+        fig_line.update_xaxes(
+            tickformat="%Y-%m",  # Formato limpio: 2024-01
+            dtick="M6",  # <--- CLAVE: Muestra una etiqueta solo cada 6 MESES
+            tickangle=0,  # Texto recto (o -45 si prefieres inclinado)
+        )
+
+        fig_line.update_yaxes(tickformat=".2s")
+
         st.plotly_chart(fig_line, use_container_width=True)
+    else:
+        st.warning("No hay datos para esta selección.")
 
-        st.markdown("---")  # Separador visual
+    # --- Gráficos de Torta y Barras ---
+    col_izq, col_der = st.columns(2)
 
-    # GRAFICO TOP PRODUCTOS (Tu código indentado)
     with col_izq:
-        st.subheader("Top 10 Productos mas exportados")
+        # 1. Traemos los datos optimizados de la nube
+        df_prod = get_top_productos(anio_sel, region_sel)
 
-        # Lógica de datos
-        top_productos = df_filtrado.groupby("CODIGO_HS", as_index=False)[
-            "VALOR_FOB"
-        ].sum()
-        top_productos = top_productos.sort_values("VALOR_FOB", ascending=False).head(10)
-        top_productos["CODIGO_HS"] = top_productos["CODIGO_HS"].astype(str)
-        top_productos["NOMBRE_PROD"] = top_productos["CODIGO_HS"].apply(
-            get_nombre_producto
-        )
+        if not df_prod.empty:
+            # --- CORRECCIÓN CRÍTICA ---
+            # 2. Convertimos el código numérico de la DB a string
+            df_prod["codigo_hs"] = df_prod["codigo_hs"].astype(str)
 
-        # Crear gráfico
-        fig_prod = px.bar(
-            top_productos,
-            x="VALOR_FOB",
-            y="NOMBRE_PROD",
-            orientation="h",
-            title="Productos mas exportados",
-            labels={"VALOR_FOB": "Valor USD", "CODIGO_HS": "Codigo Producto"},
-            text_auto=".2s",
-        )
-        fig_prod.update_layout(yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig_prod, use_container_width=True)
+            # 3. Aplicamos tu función para obtener el nombre legible
+            # (Asegúrate de que la función get_nombre_producto exista arriba)
+            df_prod["nombre_prod"] = df_prod["codigo_hs"].apply(get_nombre_producto)
 
-    # GRAFICO TOP DESTINOS (Tu código indentado)
+            # 4. Creamos el gráfico usando el NOMBRE, no el código
+            fig_bar = px.bar(
+                df_prod,
+                x="valor_fob",
+                y="nombre_prod",  # <-- Usamos la nueva columna con nombres
+                orientation="h",
+                title="Top 10 Productos Más Exportados",
+                labels={"valor_fob": "Valor USD", "nombre_prod": "Producto"},
+                text_auto=".2s",  # <-- Agrega el texto con los valores en las barras
+            )
+
+            # Ordenamos para que el más grande quede arriba
+            fig_bar.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.info("No hay datos de productos para mostrar.")
+
     with col_der:
-        st.subheader("Top 5 Destinos")
-
-        # Lógica de datos
-        top_paises = df_filtrado.groupby("PAIS_DESTINO", as_index=False)[
-            "VALOR_FOB"
-        ].sum()
-        top_paises = (top_paises.sort_values("VALOR_FOB", ascending=False)).head(5)
-
-        # Crear gráfico
-        fig_pie = px.pie(
-            top_paises,
-            names="PAIS_DESTINO",
-            values="VALOR_FOB",
-            title="Destinos mas exportados",
-            hole=0.4,
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        df_pais = get_top_paises(anio_sel, region_sel)
+        if not df_pais.empty:
+            fig_pie = px.pie(
+                df_pais,
+                names="pais_destino",
+                values="valor_fob",
+                title="Top 10 Destinos",
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
 
 with tab2:
-    st.header("Base de Datos Filtrada")
-    # Movemos la tabla aquí para limpiar la vista principal
-    st.dataframe(
-        df_filtrado.sort_values("VALOR_FOB", ascending=False), use_container_width=True
-    )
+    st.info("⚠️ Por rendimiento, se muestran solo las 5.000 transacciones más grandes.")
+    df_raw = get_raw_data(anio_sel, region_sel)
+    st.dataframe(df_raw, use_container_width=True)
 
 
 # --- FOOTER ---
