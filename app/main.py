@@ -159,7 +159,9 @@ except Exception as e:
 if region_sel == "Todas" and anio_sel == "Todos":
     titulo = "Exportaciones Históricas de Chile"
 elif region_sel != "Todas" and anio_sel == "Todos":
-    titulo = f"Histórico de {region_sel}"
+    titulo = f"Exportaciones Históricas de {region_sel}"
+elif region_sel == "Todas" and anio_sel != "Todos":
+    titulo = f"Exportaciones {anio_sel}"
 else:
     titulo = f"Exportaciones {region_sel} - {anio_sel}"
 
