@@ -161,7 +161,7 @@ if region_sel == "Todas" and anio_sel == "Todos":
 elif region_sel != "Todas" and anio_sel == "Todos":
     titulo = f"Exportaciones Históricas de {region_sel}"
 elif region_sel == "Todas" and anio_sel != "Todos":
-    titulo = f"Exportaciones {anio_sel}"
+    titulo = f"Exportaciones de Chile - {anio_sel}"
 else:
     titulo = f"Exportaciones {region_sel} - {anio_sel}"
 
